@@ -36,6 +36,7 @@ export default function AuthCallback() {
 
       const { error } = await supabase.auth.signInWithIdToken({ provider: 'google', token: idToken, nonce: saved.nonce })
       if (error) {
+        if (/signup_not_allowed|Database error saving new user/i.test(error.message)) return go('/?error=not_allowed')
         console.error('Supabase sign-in failed:', error.message)
         return go('/?error=auth')
       }

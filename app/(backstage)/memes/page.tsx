@@ -41,7 +41,7 @@ export default async function MemesPage() {
       <header className="b-head">
         <div>
           <h1>Memes</h1>
-          <p>Every AI-generated meme: the photo, the AI’s description and its five captions. Create, edit or delete any of them.</p>
+          <p>Every AI-generated meme: the photo, the AI’s description and its captions. Create, edit or delete any of them.</p>
         </div>
         <Link href="/memes/new" className="b-btn b-btn-primary">Make a meme</Link>
       </header>

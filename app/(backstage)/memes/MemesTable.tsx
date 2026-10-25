@@ -73,7 +73,7 @@ export default function MemesTable({ items: initial }: { items: MemeItem[] }) {
       {shown.length === 0 ? (
         <div className="b-empty">
           <h2>{items.length ? 'No memes match' : 'No memes yet'}</h2>
-          <p>{items.length ? 'Try a different search or filter.' : 'Make the first one: upload a photo and the AI writes five captions.'}</p>
+          <p>{items.length ? 'Try a different search or filter.' : 'Make the first one: upload a photo and the AI writes the captions.'}</p>
           {!items.length && <Link href="/memes/new" className="b-btn b-btn-primary">Make a meme</Link>}
         </div>
       ) : (

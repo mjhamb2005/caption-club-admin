@@ -7,9 +7,9 @@ import { toJpeg } from '@/lib/resize'
 import MemeThumb from '@/components/MemeThumb'
 
 type Stage = 'pick' | 'uploading' | 'thinking' | 'review' | 'saving'
-type Draft = { description: string; captions: string[]; descriptionPrompt: string; captionPrompt: string }
+type Draft = { description: string; captions: string[]; descriptionPrompt: string; captionPrompt: string; requestId: number | null }
 
-const STEPS = ['Uploading your photo', 'AI is describing it and writing five captions', 'Review and edit', 'Save']
+const STEPS = ['Uploading your photo', 'AI is describing it and writing captions', 'Review and edit', 'Save']
 
 export default function NewMeme({ adminId }: { adminId: string }) {
   const router = useRouter()
@@ -58,7 +58,7 @@ export default function NewMeme({ adminId }: { adminId: string }) {
       setPath(null); setPreview(null); setStage('pick')
       return setError(data.error || 'The AI couldn’t finish. Try again in a minute.')
     }
-    setDraft({ description: data.description, captions: data.captions, descriptionPrompt: data.descriptionPrompt, captionPrompt: data.captionPrompt })
+    setDraft({ description: data.description, captions: data.captions, descriptionPrompt: data.descriptionPrompt, captionPrompt: data.captionPrompt, requestId: data.requestId ?? null })
     setStage('review')
   }
 
@@ -80,6 +80,8 @@ export default function NewMeme({ adminId }: { adminId: string }) {
       setStage('review')
       return setError('The captions didn’t save. Try again.')
     }
+    // Link the saved meme to its generation request (shows up on the Generation requests page)
+    if (draft.requestId) await supabase.from('generation_requests').update({ meme_image_id: image.id }).eq('id', draft.requestId)
     router.replace(`/memes/${image.id}`)
     router.refresh()
   }
@@ -93,7 +95,7 @@ export default function NewMeme({ adminId }: { adminId: string }) {
       <header className="b-head">
         <div>
           <h1>Make a meme</h1>
-          <p>Upload a photo and the same AI prompt chain Caption Club uses writes a description and five captions. Edit anything before you save.</p>
+          <p>Upload a photo and the same AI prompt chain Caption Club uses writes a description and captions. Edit anything before you save.</p>
         </div>
       </header>
 

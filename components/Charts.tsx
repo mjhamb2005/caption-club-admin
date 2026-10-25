@@ -216,10 +216,10 @@ export function BarList({
   title: string
   note: ReactNode
   rows: { label: string; value: number; sub?: string }[]
-  format: 'percent' | 'score'
+  format: 'percent' | 'score' | 'count' | 'seconds'
   head: [string, string]
 }) {
-  const format = (v: number) => (kind === 'percent' ? `${Math.round(v * 100)}%` : v > 0 ? `+${v.toFixed(1)}` : v.toFixed(1))
+  const format = (v: number) => (kind === 'percent' ? `${Math.round(v * 100)}%` : kind === 'count' ? String(Math.round(v)) : kind === 'seconds' ? (v < 1 ? `${Math.round(v * 1000)} ms` : `${v.toFixed(1)} s`) : v > 0 ? `+${v.toFixed(1)}` : v.toFixed(1))
   const max = Math.max(...rows.map((r) => Math.abs(r.value)), 0.0001)
   const top = rows.reduce((b, r, i) => (r.value > rows[b].value ? i : b), 0)
   return (
@@ -243,6 +243,75 @@ export function BarList({
         ))}
       </ul>
       <TableView head={head} rows={rows.map((r) => [r.label, `${format(r.value)}${r.sub ? ` (${r.sub})` : ''}`])} />
+    </figure>
+  )
+}
+
+// Meme requests per day for the last 14 days, split into succeeded (bright) and failed (rose), stacked
+export function DailyRuns({ runs }: { runs: { at: string; ok: boolean }[] }) {
+  const [now, setNow] = useState<number | null>(null)
+  useEffect(() => setNow(Date.now()), [])
+  const { box, show, hide, el } = useTip()
+  const days = useMemo(() => {
+    if (now === null) return []
+    const start = new Date(now)
+    start.setHours(0, 0, 0, 0)
+    const out = Array.from({ length: 14 }, (_, i) => {
+      const d = new Date(start)
+      d.setDate(d.getDate() - (13 - i))
+      return { date: d, ok: 0, failed: 0 }
+    })
+    for (const r of runs) {
+      const d = new Date(r.at)
+      d.setHours(0, 0, 0, 0)
+      const hit = out.find((x) => x.date.getTime() === d.getTime())
+      if (hit) { if (r.ok) hit.ok++; else hit.failed++ }
+    }
+    return out
+  }, [runs, now])
+  const max = niceMax(Math.max(0, ...days.map((d) => d.ok + d.failed)))
+  const W = 640, H = 212, padL = 32, padB = 26, top = 22, plotH = H - padB - top, band = (W - padL) / 14, bar = Math.min(24, band - 8)
+  const fmt = (d: Date) => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  const ok = days.reduce((t, d) => t + d.ok, 0), failed = days.reduce((t, d) => t + d.failed, 0)
+  return (
+    <figure className="b-chart">
+      <figcaption>
+        <h3>Meme requests, last 14 days</h3>
+        <p>{now === null ? ' ' : `${ok} succeeded, ${failed} failed or abandoned.`}</p>
+      </figcaption>
+      <div className="b-legend"><span><i className="b-sw ok" />Succeeded</span><span><i className="b-sw bad" />Failed or abandoned</span></div>
+      <div className="b-plot" ref={box} onPointerLeave={hide}>
+        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Stacked column chart of meme requests per day, succeeded and failed">
+          {[0, 0.5, 1].map((f) => {
+            const y = top + plotH * (1 - f)
+            return (
+              <g key={f}>
+                <line x1={padL} x2={W} y1={y} y2={y} className="b-grid" />
+                <text x={padL - 8} y={y + 4} className="b-axis" textAnchor="end">{Math.round(max * f)}</text>
+              </g>
+            )
+          })}
+          {days.map((d, i) => {
+            const hOk = (d.ok / max) * plotH, hBad = (d.failed / max) * plotH
+            const x = padL + i * band + (band - bar) / 2
+            const label = `${d.ok} succeeded, ${d.failed} failed`
+            return (
+              <g key={i}>
+                {hOk > 0 && <rect x={x} y={top + plotH - hOk} width={bar} height={hOk} className="b-mark-hi" />}
+                {hBad > 0 && <rect x={x} y={top + plotH - hOk - hBad} width={bar} height={Math.max(0, hBad - (hOk > 0 ? 2 : 0))} className="b-mark-bad" />}
+                {(i % 2 === 1 || i === days.length - 1) && (
+                  <text x={x + bar / 2} y={H - 6} className="b-axis" textAnchor="middle">{i === days.length - 1 ? 'Today' : fmt(d.date)}</text>
+                )}
+                <rect x={padL + i * band} y={0} width={band} height={top + plotH} className="b-hit" tabIndex={0} aria-label={`${fmt(d.date)}: ${label}`}
+                  onPointerMove={(e) => show(e, label, fmt(d.date))}
+                  onFocus={(e) => show(e.currentTarget.getBoundingClientRect(), label, fmt(d.date))} onBlur={hide} />
+              </g>
+            )
+          })}
+        </svg>
+        {el}
+      </div>
+      <TableView head={['Day', 'Succeeded / failed']} rows={days.map((d) => [fmt(d.date), `${d.ok} / ${d.failed}`])} />
     </figure>
   )
 }

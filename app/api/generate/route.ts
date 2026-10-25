@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server'
 import { adminOrNull } from '@/lib/admin'
-import { DESCRIBE_PROMPT, captionPrompt, describeImage, writeCaptions } from '@/lib/ai'
+import { finishRequest, logStep, pickChain, render, runStep, runTextSteps, startRequest } from '@/lib/chain'
 
 export const maxDuration = 60
 
-// Runs the AI prompt chain on a photo an admin just uploaded, but saves nothing.
-// The admin reviews and edits the results before creating the meme.
+// Runs the same prompt chain Caption Club uses (picked from the mix) on a photo an admin just uploaded.
+// Saves no meme: the admin reviews and edits first. The run is logged as a "backstage" generation request,
+// and the meme is linked to it when the admin saves.
 export async function POST(request: Request) {
   const admin = await adminOrNull()
   if (!admin) return NextResponse.json({ error: 'Superadmins only.' }, { status: 403 })
@@ -20,13 +21,27 @@ export async function POST(request: Request) {
   const { data: file, error } = await supabase.storage.from('memes').download(path)
   if (error || !file) return NextResponse.json({ error: 'Couldn’t find the uploaded photo. Try again.' }, { status: 404 })
 
+  const chain = await pickChain(supabase)
+  const requestId = await startRequest(supabase, { userId: user.id, source: 'backstage', chain, storagePath: path })
+  const startedAt = Date.now()
+  const first = chain.steps[0]
+
   try {
-    const description = (await describeImage(Buffer.from(await file.arrayBuffer()).toString('base64'))).slice(0, 2000)
-    if (!description) throw new Error('Empty description')
-    const captions = await writeCaptions(description)
-    return NextResponse.json({ description, captions, descriptionPrompt: DESCRIBE_PROMPT, captionPrompt: captionPrompt(description) })
-  } catch (e) {
+    let description: string
+    try {
+      const result = await runStep(first, render(first.template, chain, {}), Buffer.from(await file.arrayBuffer()).toString('base64'))
+      await logStep(supabase, requestId, first, { result })
+      description = result.text.slice(0, 2000)
+    } catch (e: any) {
+      await logStep(supabase, requestId, first, { error: e })
+      throw Object.assign(e, { failedStep: 1 })
+    }
+    const { captions, captionPrompt } = await runTextSteps(supabase, requestId, chain, description)
+    await finishRequest(supabase, requestId, { status: 'succeeded', startedAt })
+    return NextResponse.json({ description, captions, descriptionPrompt: first.template, captionPrompt, requestId, chain: chain.name })
+  } catch (e: any) {
     console.error('generate failed', e)
-    return NextResponse.json({ error: 'The AI couldn’t finish. Try again in a minute.' }, { status: 502 })
+    await finishRequest(supabase, requestId, { status: 'failed', startedAt, failedStep: e?.failedStep, error: String(e?.message ?? e) })
+    return NextResponse.json({ error: 'The AI couldn’t finish. Try again in a minute.', requestId }, { status: 502 })
   }
 }

@@ -3,6 +3,7 @@ import SignInButton from '@/components/SignInButton'
 const MESSAGES: Record<string, string> = {
   cancelled: 'Sign-in was cancelled. Try again whenever you’re ready.',
   auth: 'Google sign-in didn’t finish. Try again.',
+  not_allowed: 'That email isn’t on the allowed sign-up list.',
 }
 
 // The stage door. Signed-in visitors never see this: the proxy sends them to the dashboard.
