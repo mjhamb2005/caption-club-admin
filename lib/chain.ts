@@ -185,7 +185,7 @@ const RETRYABLE = [429, 500, 503]
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const ALLOWED_KEY = /^[A-Z][A-Z0-9_]*_API_KEY$/
 
-async function callOnce(model: ModelInfo, prompt: string, step: Step, imageBase64?: string) {
+async function callOnce(model: ModelInfo, prompt: string, step: Step, imageBase64: string | undefined, signal: AbortSignal) {
   if (!ALLOWED_KEY.test(model.keyEnv) || model.keyEnv.includes('SUPABASE')) {
     return { ok: false as const, status: null, error: `Key variable ${model.keyEnv} isn't allowed` }
   }
@@ -200,6 +200,7 @@ async function callOnce(model: ModelInfo, prompt: string, step: Step, imageBase6
     res = await fetch(`${model.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+      signal,
       body: JSON.stringify({
         model: model.apiModelId,
         messages: [{ role: 'user', content }],
@@ -225,6 +226,7 @@ async function callOnce(model: ModelInfo, prompt: string, step: Step, imageBase6
   res = await fetch(`${model.baseUrl}/models/${encodeURIComponent(model.apiModelId)}:generateContent`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+    signal,
     body: JSON.stringify({ contents: [{ role: 'user', parts }], ...(Object.keys(config).length ? { generationConfig: config } : {}) }),
   })
   if (!res.ok) return { ok: false as const, status: res.status, error: (await res.text()).slice(0, 600) }
@@ -236,20 +238,32 @@ async function callOnce(model: ModelInfo, prompt: string, step: Step, imageBase6
   }
 }
 
-// Runs one step: main model with up to 3 tries on overload, then the backup model.
-export async function runStep(step: Step, prompt: string, imageBase64?: string): Promise<StepResult> {
+// Vercel stops a request after 60 seconds, so every step works against a time budget.
+// The main model gets up to 20 seconds per try. If it's slow or overloaded, the backup model gets the time left.
+// Either way the step ends before Vercel's limit, so the failure is logged instead of the request being cut off.
+const TRY_MS = 20_000
+export const STEP_BUDGET_MS = 45_000
+
+export async function runStep(step: Step, prompt: string, imageBase64?: string, budgetMs = STEP_BUDGET_MS): Promise<StepResult> {
   const started = Date.now()
+  const deadline = started + budgetMs
   const models = step.fallback ? [step.model, step.fallback] : [step.model]
   let attempts = 0
   let last = { status: null as number | null, error: 'No model ran', model: step.model }
-  for (const model of models) {
+  for (const [m, model] of models.entries()) {
+    const isLast = m === models.length - 1
     for (let i = 0; i < 3; i++) {
+      const left = deadline - Date.now()
+      if (left < 3000) break
+      // keep at least ~15s for the backup model when there is one
+      const limit = isLast ? left : Math.min(TRY_MS, Math.max(3000, left - 15_000))
       attempts++
       let r: Awaited<ReturnType<typeof callOnce>>
       try {
-        r = await callOnce(model, prompt, step, imageBase64)
+        r = await callOnce(model, prompt, step, imageBase64, AbortSignal.timeout(limit))
       } catch (e: any) {
-        r = { ok: false, status: null, error: `Network error: ${e?.message ?? e}` }
+        const timedOut = e?.name === 'TimeoutError' || e?.name === 'AbortError'
+        r = { ok: false, status: null, error: timedOut ? `No answer within ${Math.round(limit / 1000)} seconds` : `Network error: ${e?.message ?? e}` }
       }
       if (r.ok && r.text) {
         return {
@@ -258,8 +272,9 @@ export async function runStep(step: Step, prompt: string, imageBase64?: string):
         }
       }
       last = r.ok ? { status: r.status, error: 'Empty response', model } : { status: r.status, error: r.error, model }
-      if (!r.ok && (r.status === null || !RETRYABLE.includes(r.status))) break // bad key/model: go to the backup
-      if (i < 2) await wait(1000 * (i + 1))
+      // slow, bad key or unknown model: go straight to the backup. Overloaded (429/500/503): wait briefly and retry.
+      if (!r.ok && (r.status === null || !RETRYABLE.includes(r.status))) break
+      if (i < 2) await wait(Math.min(1000 * (i + 1), Math.max(0, deadline - Date.now() - 3000)))
     }
   }
   throw new StepError(`${last.model.name}${last.status ? ` ${last.status}` : ''}: ${last.error}`.slice(0, 900), {
@@ -357,14 +372,16 @@ export async function finishRequest(
 }
 
 // Runs every step after step 1 (text only), feeding each output into the next. Returns the captions.
-export async function runTextSteps(supabase: SB, requestId: number | null, chain: Chain, description: string) {
+export async function runTextSteps(supabase: SB, requestId: number | null, chain: Chain, description: string, budgetMs = STEP_BUDGET_MS) {
   let previous = description
   let lastPrompt = ''
-  for (const step of chain.steps.slice(1)) {
+  const textSteps = chain.steps.slice(1)
+  const endBy = Date.now() + budgetMs // all text steps share one request's time
+  for (const [i, step] of textSteps.entries()) {
     const prompt = render(step.template, chain, { description, previous })
     lastPrompt = prompt
     try {
-      const result = await runStep(step, prompt)
+      const result = await runStep(step, prompt, undefined, Math.max(5000, (endBy - Date.now()) / (textSteps.length - i)))
       await logStep(supabase, requestId, step, { result })
       previous = result.text
     } catch (e: any) {

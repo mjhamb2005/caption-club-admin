@@ -29,14 +29,15 @@ export async function POST(request: Request) {
   try {
     let description: string
     try {
-      const result = await runStep(first, render(first.template, chain, {}), Buffer.from(await file.arrayBuffer()).toString('base64'))
+      // Both steps share one 60-second request here: about 25s to describe, 28s to write captions
+      const result = await runStep(first, render(first.template, chain, {}), Buffer.from(await file.arrayBuffer()).toString('base64'), 25_000)
       await logStep(supabase, requestId, first, { result })
       description = result.text.slice(0, 2000)
     } catch (e: any) {
       await logStep(supabase, requestId, first, { error: e })
       throw Object.assign(e, { failedStep: 1 })
     }
-    const { captions, captionPrompt } = await runTextSteps(supabase, requestId, chain, description)
+    const { captions, captionPrompt } = await runTextSteps(supabase, requestId, chain, description, Math.max(10_000, 53_000 - (Date.now() - startedAt)))
     await finishRequest(supabase, requestId, { status: 'succeeded', startedAt })
     return NextResponse.json({ description, captions, descriptionPrompt: first.template, captionPrompt, requestId, chain: chain.name })
   } catch (e: any) {
