@@ -30,7 +30,7 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
     <div className="b-page">
       <Link href="/requests" className="b-back">← All generation requests</Link>
       <PageHead title={`Request #${id}`} error={error?.message}>
-        {r && <>Started {when(r.created_at)} UTC by {who ? displayName(who) : 'an unknown user'} in {r.source === 'backstage' ? 'Backstage' : 'Caption Club'}, using the <code>{r.chain_slug}</code> chain.</>}
+        {r && <>Started {when(r.created_at)} UTC by {who ? displayName(who) : 'an unknown user'} in {r.source === 'backstage' ? 'Backstage' : r.source === 'chain_tool' ? 'Writers’ Room' : 'Caption Club'}, using the <code>{r.chain_slug}</code> chain.</>}
       </PageHead>
       {r && (
         <div className="b-req">

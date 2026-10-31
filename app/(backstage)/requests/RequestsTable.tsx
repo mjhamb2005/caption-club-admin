@@ -23,7 +23,7 @@ export default function RequestsTable({ rows }: { rows: Row[] }) {
         </div>
         <label className="b-select"><span>Source</span>
           <select value={source} onChange={(e) => setSource(e.target.value)}>
-            <option value="all">All</option><option value="caption_club">Caption Club</option><option value="backstage">Backstage</option>
+            <option value="all">All</option><option value="caption_club">Caption Club</option><option value="backstage">Backstage</option><option value="chain_tool">Writers’ Room</option>
           </select>
         </label>
         <label className="b-select"><span>Chain</span>
@@ -42,7 +42,7 @@ export default function RequestsTable({ rows }: { rows: Row[] }) {
                 <td><Link className="b-link" href={`/requests/${r.id}`}><b>#{r.id}</b></Link></td>
                 <td><time dateTime={r.created_at}>{when(r.created_at)}</time></td>
                 <td>{r.who}</td>
-                <td>{r.source === 'backstage' ? 'Backstage' : 'Caption Club'}</td>
+                <td>{r.source === 'backstage' ? 'Backstage' : r.source === 'chain_tool' ? 'Writers’ Room' : 'Caption Club'}</td>
                 <td><code>{r.chain_slug ?? '—'}</code></td>
                 <td><StatusPill status={r.state} />{r.fallback && <span className="b-pill off" title="A backup model answered at least one step">backup</span>}</td>
                 <td className="num">{r.calls}{r.retries ? <small className="b-sub-inline"> +{r.retries} retries</small> : null}</td>
